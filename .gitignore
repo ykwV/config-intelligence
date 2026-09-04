@@ -1,0 +1,15 @@
+# Python Backend
+venv/
+__pycache__/
+*.pyc
+.env
+
+# Next.js Frontend
+frontend/node_modules/
+frontend/.next/
+frontend/out/
+frontend/.env.local
+
+# Large Datasets (Optional: remove if you want them in the repo)
+*.csv
+*.jsonl
