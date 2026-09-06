@@ -1,0 +1,12 @@
+{
+  "name": "config-intelligence-root",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "build": "npm --prefix frontend run build",
+    "start": "npm --prefix frontend start"
+  },
+  "dependencies": {
+    "next": "^14.0.0"
+  }
+}

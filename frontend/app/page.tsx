@@ -42,7 +42,7 @@ import {
   ZAxis,
 } from "recharts";
 
-const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+const API_BASE = process.env.NEXT_PUBLIC_API_URL || "https://config-intelligence.onrender.com";
 
 const emptySubscribe = () => () => {};
 
@@ -106,33 +106,10 @@ interface DiffParam {
   State: string;
 }
 
-interface ParetoDataPoint {
-  Run_ID: string;
-  Execution_Time_sec: number;
-  Peak_Memory_GB: number;
-  Is_Pareto: boolean;
-  Throughput_MBps: number;
-  Memory_Alloc?: string;
-}
-
-interface TooltipPayloadItem<T> {
-  name?: string;
-  value?: number | string;
-  unit?: string;
-  dataKey?: string;
-  payload?: T;
-}
-
-const CustomParetoTooltip = ({
-  active,
-  payload,
-}: {
-  active?: boolean;
-  payload?: Array<TooltipPayloadItem<ParetoDataPoint>>;
-}) => {
-  if (!active || !payload || payload.length === 0) return null;
-  const raw = payload[0];
-  const d = raw?.payload;
+// Fixed Tooltip: Robust type-agnostic component to avoid Recharts build crashes
+const CustomParetoTooltip = ({ active, payload }: any) => {
+  if (!active || !payload || !payload.length) return null;
+  const d = payload[0]?.payload;
   if (!d) return null;
 
   const runId = d.Run_ID || "Execution Trace";
@@ -191,27 +168,15 @@ const CustomParetoTooltip = ({
   );
 };
 
-interface ShapDataPoint {
-  Feature: string;
-  Importance_Score: number;
-  Impact_Direction: string;
-}
-
-const CustomShapTooltip = ({
-  active,
-  payload,
-}: {
-  active?: boolean;
-  payload?: Array<TooltipPayloadItem<ShapDataPoint>>;
-}) => {
-  if (!active || !payload || payload.length === 0) return null;
-  const raw = payload[0];
-  const d = raw?.payload;
+// Fixed Tooltip: Explicit contrast styling preventing black text inheritance
+const CustomShapTooltip = ({ active, payload }: any) => {
+  if (!active || !payload || !payload.length) return null;
+  const d = payload[0]?.payload;
   if (!d) return null;
 
   const feature = d.Feature || "Feature";
   const direction = d.Impact_Direction || "";
-  const isRisk = direction.includes("Increases");
+  const isRisk = direction.includes("Increases") || direction.includes("Risk");
   const score = d.Importance_Score;
 
   return (
@@ -362,53 +327,8 @@ export default function ObservabilityDashboard() {
   }, [fetchRuns]);
 
   useEffect(() => {
-    let ignore = false;
-    const init = async () => {
-      try {
-        const healthRes = await axios.get(`${API_BASE}/api/health`, { timeout: 4000 });
-        if (!ignore && healthRes.data.status === "healthy") {
-          setBackendHealthy(true);
-        }
-
-        const dashRes = await axios.get(`${API_BASE}/api/dashboard`);
-        if (!ignore) {
-          setDashboardData(dashRes.data);
-          if (dashRes.data.pass_runs?.length && dashRes.data.fail_runs?.length) {
-            setDiffPassId(dashRes.data.pass_runs[0]);
-            setDiffFailId(dashRes.data.fail_runs[0]);
-          }
-        }
-
-        const res = await axios.get(`${API_BASE}/api/runs`, { params: { limit: 15, offset: 0 } });
-        if (!ignore) {
-          setRuns(res.data.runs || []);
-          setTotalRunsCount(res.data.total || 0);
-          if (res.data.runs && res.data.runs.length > 0) {
-            inspectRun(res.data.runs[0].Run_ID);
-          }
-        }
-      } catch (err: unknown) {
-        if (!ignore) {
-          setBackendHealthy(false);
-          let detail = "Could not connect to ConfigIntel backend on " + API_BASE;
-          if (axios.isAxiosError(err)) {
-            detail = err.response?.data?.detail || err.message;
-          } else if (err instanceof Error) {
-            detail = err.message;
-          }
-          setErrorMsg(detail);
-        }
-      } finally {
-        if (!ignore) {
-          setLoading(false);
-        }
-      }
-    };
-    init();
-    return () => {
-      ignore = true;
-    };
-  }, [inspectRun]);
+    fetchHealthAndDashboard();
+  }, [fetchHealthAndDashboard]);
 
   // Diff Fetcher
   const computeDiff = useCallback(async (passId: string, failId: string) => {
@@ -546,7 +466,6 @@ export default function ObservabilityDashboard() {
 
         {/* Action Controls & Backend Status */}
         <div className="flex items-center gap-3">
-          {/* Status Indicator */}
           <div className="flex items-center gap-2 px-3 py-1.5 rounded-full bg-slate-900/90 border border-slate-800 text-xs">
             <span
               className={`h-2 w-2 rounded-full ${
@@ -711,7 +630,7 @@ export default function ObservabilityDashboard() {
               </div>
             </div>
 
-            {/* View Mode Switcher: All Views vs Interactive Charts vs Direct XGBoost PNG vs SHAP PNG */}
+            {/* View Mode Switcher */}
             <div className="flex flex-wrap items-center justify-between gap-3 bg-[#0b1120] border border-slate-800 p-2.5 rounded-xl shadow-sm">
               <div className="flex items-center gap-2">
                 <span className="text-xs text-slate-400 font-medium pl-2">Display Format:</span>
@@ -786,7 +705,7 @@ export default function ObservabilityDashboard() {
               </div>
             </div>
 
-            {/* SECTION 1: INTERACTIVE CHARTS (Shown in 'all' and 'interactive' modes) */}
+            {/* SECTION 1: INTERACTIVE CHARTS */}
             {(overviewViewMode === "all" || overviewViewMode === "interactive") && (
               <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 animate-fadeIn">
                 {/* SHAP Feature Attribution */}
@@ -840,17 +759,11 @@ export default function ObservabilityDashboard() {
                         <Tooltip
                           cursor={{ fill: "rgba(99, 102, 241, 0.08)" }}
                           wrapperStyle={{ outline: "none", zIndex: 100 }}
-                          contentStyle={{
-                            backgroundColor: "#0b1120",
-                            borderColor: "#334155",
-                            color: "#f8fafc",
-                          }}
-                          itemStyle={{ color: "#f8fafc" }}
                           content={<CustomShapTooltip />}
                         />
                         <Bar dataKey="Importance_Score" radius={[0, 4, 4, 0]}>
                           {dashboardData.shap_metrics.map((entry, index) => {
-                            const isRisk = entry.Impact_Direction.includes("Increases");
+                            const isRisk = entry.Impact_Direction.includes("Increases") || entry.Impact_Direction.includes("Risk");
                             return (
                               <Cell
                                 key={`cell-${index}`}
@@ -907,12 +820,6 @@ export default function ObservabilityDashboard() {
                         <Tooltip
                           cursor={{ strokeDasharray: "3 3", stroke: "#64748b" }}
                           wrapperStyle={{ outline: "none", zIndex: 100 }}
-                          contentStyle={{
-                            backgroundColor: "#0b1120",
-                            borderColor: "#334155",
-                            color: "#f8fafc",
-                          }}
-                          itemStyle={{ color: "#f8fafc" }}
                           content={<CustomParetoTooltip />}
                         />
                         <Scatter
@@ -934,7 +841,7 @@ export default function ObservabilityDashboard() {
               </div>
             )}
 
-            {/* SECTION 2: DIRECT NATIVE PLOTS GENERATED BY XGBOOST & SHAP (Directly visible in 'all' mode) */}
+            {/* SECTION 2: DIRECT NATIVE PLOTS */}
             {overviewViewMode === "all" && (
               <div className="bg-[#0b1120] border border-slate-800 rounded-xl p-6 shadow-md flex flex-col gap-6 animate-fadeIn">
                 <div className="flex items-center justify-between flex-wrap gap-2 pb-3 border-b border-slate-800">
@@ -1084,7 +991,7 @@ export default function ObservabilityDashboard() {
               </div>
             )}
 
-            {/* VIEW 2: DIRECT XGBOOST PLOT FULL WIDTH (When 'xgboost_png' selected) */}
+            {/* VIEW 2: DIRECT XGBOOST PLOT FULL WIDTH */}
             {overviewViewMode === "xgboost_png" && (
               <div className="bg-[#0b1120] border border-slate-800 rounded-xl p-6 shadow-md flex flex-col gap-4 animate-fadeIn">
                 <div className="flex items-center justify-between flex-wrap gap-2 pb-3 border-b border-slate-800">
@@ -1132,16 +1039,10 @@ export default function ObservabilityDashboard() {
                     className="max-h-[550px] w-auto rounded-lg shadow-xl object-contain border border-slate-800/80"
                   />
                 </div>
-                <div className="text-xs text-slate-300 bg-slate-900/60 p-3.5 rounded-lg border border-slate-800 flex items-start gap-2.5">
-                  <Sparkles className="h-4 w-4 text-indigo-400 shrink-0 mt-0.5" />
-                  <div className="leading-relaxed">
-                    <strong className="text-white">XGBoost Native F-Score Attribution:</strong> The F-score metric reflects the frequency with which a feature was chosen to split decision tree leaves. Notice that <code className="text-rose-300 bg-black/40 px-1 py-0.5 rounded font-mono">Feature_Flag_X</code> and <code className="text-rose-300 bg-black/40 px-1 py-0.5 rounded font-mono">Random_Seed_Group</code> dominate tree decision splits across the ensemble.
-                  </div>
-                </div>
               </div>
             )}
 
-            {/* VIEW 3: DIRECT SHAP SUMMARY BEESWARM FULL WIDTH (When 'shap_png' selected) */}
+            {/* VIEW 3: DIRECT SHAP SUMMARY BEESWARM FULL WIDTH */}
             {overviewViewMode === "shap_png" && (
               <div className="bg-[#0b1120] border border-slate-800 rounded-xl p-6 shadow-md flex flex-col gap-4 animate-fadeIn">
                 <div className="flex items-center justify-between flex-wrap gap-2 pb-3 border-b border-slate-800">
@@ -1189,12 +1090,6 @@ export default function ObservabilityDashboard() {
                     className="max-h-[550px] w-auto rounded-lg shadow-xl object-contain border border-slate-800/80"
                   />
                 </div>
-                <div className="text-xs text-slate-300 bg-slate-900/60 p-3.5 rounded-lg border border-slate-800 flex items-start gap-2.5">
-                  <Sparkles className="h-4 w-4 text-indigo-400 shrink-0 mt-0.5" />
-                  <div className="leading-relaxed">
-                    <strong className="text-white">SHAP Value Distribution:</strong> Each dot corresponds to an individual execution. Red represents high parameter values (e.g. Feature Flag X enabled), while blue represents low values. A rightward displacement demonstrates positive contribution to failure log-odds.
-                  </div>
-                </div>
               </div>
             )}
 
@@ -1214,7 +1109,6 @@ export default function ObservabilityDashboard() {
         {/* TAB 2: TRACE & LOG EXPLORER */}
         {activeTab === "explorer" && (
           <div className="flex flex-col gap-6 animate-fadeIn">
-            {/* Filter Bar */}
             <div className="flex flex-wrap items-center justify-between gap-4 bg-[#0b1120] border border-slate-800 rounded-xl p-4">
               <div className="flex items-center gap-3 flex-1 min-w-[280px]">
                 <div className="relative flex-1">
@@ -1287,7 +1181,6 @@ export default function ObservabilityDashboard() {
 
             {/* Split View: Telemetry Table + Live Trace Console */}
             <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
-              {/* Runs Table */}
               <div className="lg:col-span-7 bg-[#0b1120] border border-slate-800 rounded-xl overflow-hidden shadow-md flex flex-col">
                 <div className="p-3.5 border-b border-slate-800 bg-slate-900/50 flex items-center justify-between">
                   <span className="text-xs font-semibold uppercase tracking-wider text-slate-400">
@@ -1413,7 +1306,6 @@ export default function ObservabilityDashboard() {
         {/* TAB 3: ROOT CAUSE DIFFS */}
         {activeTab === "diff" && dashboardData && (
           <div className="flex flex-col gap-6 animate-fadeIn">
-            {/* Diff Selectors */}
             <div className="bg-[#0b1120] border border-slate-800 rounded-xl p-5 shadow-md flex flex-col gap-4">
               <div className="flex items-center justify-between">
                 <div>
@@ -1569,7 +1461,6 @@ export default function ObservabilityDashboard() {
         {/* TAB 4: AI COPILOT */}
         {activeTab === "copilot" && (
           <div className="flex flex-col gap-6 animate-fadeIn">
-            {/* Copilot Config Header */}
             <div className="bg-[#0b1120] border border-slate-800 rounded-xl p-5 shadow-md flex flex-col gap-4">
               <div className="flex flex-wrap items-center justify-between gap-4">
                 <div>
@@ -1582,7 +1473,6 @@ export default function ObservabilityDashboard() {
                   </p>
                 </div>
 
-                {/* Mode Selector */}
                 <div className="flex items-center bg-slate-900 border border-slate-800 p-1 rounded-lg text-xs">
                   <button
                     onClick={() => setCopilotMode("Native")}
@@ -1607,7 +1497,6 @@ export default function ObservabilityDashboard() {
                 </div>
               </div>
 
-              {/* Gemini Key Input (Optional if mode is Gemini) */}
               {copilotMode === "Gemini" && (
                 <div className="flex items-center gap-2 bg-slate-900/80 border border-slate-800 rounded-lg p-2.5">
                   <Key className="h-4 w-4 text-slate-400 shrink-0" />
@@ -1621,7 +1510,6 @@ export default function ObservabilityDashboard() {
                 </div>
               )}
 
-              {/* Executive Summary Button */}
               <div className="flex items-center justify-between pt-2 border-t border-slate-800/80">
                 <span className="text-xs text-slate-400">
                   Generate comprehensive 3-section AI engineering summary
@@ -1637,7 +1525,6 @@ export default function ObservabilityDashboard() {
               </div>
             </div>
 
-            {/* Generated Summary Card */}
             {copilotSummary && (
               <div className="bg-[#0b1120] border border-indigo-500/30 rounded-xl p-6 shadow-xl relative overflow-hidden">
                 <div className="flex items-center justify-between pb-3 mb-4 border-b border-slate-800">
@@ -1658,7 +1545,6 @@ export default function ObservabilityDashboard() {
               </div>
             )}
 
-            {/* Natural Language Query Box */}
             <div className="bg-[#0b1120] border border-slate-800 rounded-xl p-5 shadow-md flex flex-col gap-4">
               <div className="flex flex-col gap-2">
                 <label className="text-xs font-medium text-slate-300">Natural Language Verification Query</label>
@@ -1684,7 +1570,6 @@ export default function ObservabilityDashboard() {
                 </div>
               </div>
 
-              {/* Quick Prompts */}
               <div className="flex flex-wrap items-center gap-2 text-xs text-slate-400">
                 <span className="text-[11px] font-mono text-slate-500">Suggested:</span>
                 {[
@@ -1706,7 +1591,6 @@ export default function ObservabilityDashboard() {
                 ))}
               </div>
 
-              {/* Copilot Response Display */}
               {copilotResponse && (
                 <div className="bg-slate-900/90 border border-slate-800 rounded-xl p-4 mt-2">
                   <div className="text-xs font-semibold text-indigo-400 mb-2 flex items-center gap-1.5">
@@ -1749,7 +1633,10 @@ export default function ObservabilityDashboard() {
                   type="file"
                   accept=".csv"
                   required
-                  onChange={(e: ChangeEvent<HTMLInputElement>) => setCsvFile(e.target.files?.[0] || null)}
+                  onChange={(e: ChangeEvent<HTMLInputElement>) => {
+                    const files = e.target.files;
+                    setCsvFile(files && files.length > 0 ? files[0] : null);
+                  }}
                   className="w-full bg-slate-900 border border-slate-800 rounded-lg p-2 text-xs text-slate-300 file:mr-3 file:py-1 file:px-2.5 file:rounded file:border-0 file:text-xs file:font-semibold file:bg-indigo-600 file:text-white hover:file:bg-indigo-500"
                 />
               </div>
@@ -1761,7 +1648,10 @@ export default function ObservabilityDashboard() {
                 <input
                   type="file"
                   accept=".jsonl,.txt"
-                  onChange={(e: ChangeEvent<HTMLInputElement>) => setJsonlFile(e.target.files?.[0] || null)}
+                  onChange={(e: ChangeEvent<HTMLInputElement>) => {
+                    const files = e.target.files;
+                    setJsonlFile(files && files.length > 0 ? files[0] : null);
+                  }}
                   className="w-full bg-slate-900 border border-slate-800 rounded-lg p-2 text-xs text-slate-300 file:mr-3 file:py-1 file:px-2.5 file:rounded file:border-0 file:text-xs file:font-semibold file:bg-slate-800 file:text-slate-300 hover:file:bg-slate-700"
                 />
               </div>
@@ -1825,7 +1715,7 @@ export default function ObservabilityDashboard() {
                   onClick={() => setLightboxImage(null)}
                   className="text-slate-400 hover:text-white p-1.5 rounded-lg hover:bg-slate-800 transition-colors"
                 >
-                  <X className="h-5 w-5" />
+                  <X className="h-4 w-4" />
                 </button>
               </div>
             </div>
