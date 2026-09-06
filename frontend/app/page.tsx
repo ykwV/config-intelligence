@@ -17,8 +17,6 @@ import {
   Cpu,
   Download,
   ExternalLink,
-  FileCode2,
-  FileText,
   Image as ImageIcon,
   Key,
   Layers,
@@ -114,7 +112,6 @@ interface DiffParam {
   State: string;
 }
 
-// Custom Tooltip for Pareto Scatter Plot
 const CustomParetoTooltip = ({ active, payload }: any) => {
   if (!active || !payload || !payload.length) return null;
   const d = payload[0]?.payload;
@@ -176,7 +173,6 @@ const CustomParetoTooltip = ({ active, payload }: any) => {
   );
 };
 
-// Custom Tooltip for SHAP Bar Chart
 const CustomShapTooltip = ({ active, payload }: any) => {
   if (!active || !payload || !payload.length) return null;
   const d = payload[0]?.payload;
@@ -223,15 +219,17 @@ const CustomShapTooltip = ({ active, payload }: any) => {
 export default function ObservabilityDashboard() {
   const mounted = useMounted();
 
-  // Authentication State
-  const [isAuthenticated, setIsAuthenticated] = useState<boolean>(true);
-  const [loginUsername, setLoginUsername] = useState("verification_lead");
-  const [loginPassword, setLoginPassword] = useState("••••••••••••");
+  // Authentication & Layout State
+  const [isAuthenticated, setIsAuthenticated] = useState<boolean>(false);
+  const [loginUsername, setLoginUsername] = useState("");
+  const [loginPassword, setLoginPassword] = useState("");
   const [showProfileModal, setShowProfileModal] = useState(false);
+  const [showAboutModal, setShowAboutModal] = useState(false);
 
-  // Navigation & Panel Layout
   const [activeTab, setActiveTab] = useState<"overview" | "explorer" | "diff">("overview");
   const [rightPanelOpen, setRightPanelOpen] = useState<boolean>(true);
+  const [rightPanelWidth, setRightPanelWidth] = useState(420);
+  const [isDraggingRightPanel, setIsDraggingRightPanel] = useState(false);
   const [overviewViewMode, setOverviewViewMode] = useState<"all" | "interactive" | "xgboost_png" | "shap_png">("all");
   const [lightboxImage, setLightboxImage] = useState<{ src: string; title: string; desc: string } | null>(null);
 
@@ -247,7 +245,7 @@ export default function ObservabilityDashboard() {
   const [ingestLoading, setIngestLoading] = useState(false);
   const [ingestSuccessMsg, setIngestSuccessMsg] = useState<string | null>(null);
 
-  // Explorer State
+  // Explorer & Diff States
   const [runs, setRuns] = useState<RunRecord[]>([]);
   const [totalRunsCount, setTotalRunsCount] = useState(0);
   const [runsPage, setRunsPage] = useState(0);
@@ -258,21 +256,39 @@ export default function ObservabilityDashboard() {
   const [selectedRunTrace, setSelectedRunTrace] = useState<TraceEvent[]>([]);
   const [traceLoading, setTraceLoading] = useState(false);
 
-  // Diff State
   const [diffPassId, setDiffPassId] = useState<string>("");
   const [diffFailId, setDiffFailId] = useState<string>("");
   const [diffParams, setDiffParams] = useState<DiffParam[]>([]);
   const [diffLogPass, setDiffLogPass] = useState<TraceEvent[]>([]);
   const [diffLogFail, setDiffLogFail] = useState<TraceEvent[]>([]);
   const [diffLoading, setDiffLoading] = useState(false);
-
   // Copilot State
-  const [copilotMode, setCopilotMode] = useState<"Native" | "Gemini">("Native");
   const [geminiKey, setGeminiKey] = useState<string>("");
   const [copilotQuery, setCopilotQuery] = useState<string>("");
   const [copilotMessages, setCopilotMessages] = useState<Array<{ role: "user" | "assistant"; text: string }>>([]);
   const [copilotLoading, setCopilotLoading] = useState(false);
   const [summaryLoading, setSummaryLoading] = useState(false);
+
+  // Sliding Panel Resize Logic
+  useEffect(() => {
+    const handleMouseMove = (e: MouseEvent) => {
+      if (!isDraggingRightPanel) return;
+      const newWidth = document.body.clientWidth - e.clientX;
+      if (newWidth > 320 && newWidth < 800) {
+        setRightPanelWidth(newWidth);
+      }
+    };
+    const handleMouseUp = () => setIsDraggingRightPanel(false);
+
+    if (isDraggingRightPanel) {
+      document.addEventListener("mousemove", handleMouseMove);
+      document.addEventListener("mouseup", handleMouseUp);
+    }
+    return () => {
+      document.removeEventListener("mousemove", handleMouseMove);
+      document.removeEventListener("mouseup", handleMouseUp);
+    };
+  }, [isDraggingRightPanel]);
 
   const inspectRun = useCallback(async (runId: string) => {
     setSelectedRunId(runId);
@@ -339,7 +355,6 @@ export default function ObservabilityDashboard() {
     fetchHealthAndDashboard();
   }, [fetchHealthAndDashboard]);
 
-  // Diff Fetcher
   const computeDiff = useCallback(async (passId: string, failId: string) => {
     if (!passId || !failId) return;
     setDiffLoading(true);
@@ -361,7 +376,6 @@ export default function ObservabilityDashboard() {
     computeDiff(diffPassId, diffFailId);
   };
 
-  // Copilot Actions
   const handleExecuteCopilotQuery = async (queryText?: string) => {
     const q = queryText || copilotQuery;
     if (!q.trim()) return;
@@ -372,7 +386,7 @@ export default function ObservabilityDashboard() {
     try {
       const res = await axios.post(`${API_BASE}/api/copilot/chat`, {
         query: userMsg,
-        mode: copilotMode,
+        mode: "Gemini",
         gemini_key: geminiKey,
       });
       setCopilotMessages((prev) => [...prev, { role: "assistant", text: res.data.response }]);
@@ -394,7 +408,7 @@ export default function ObservabilityDashboard() {
     try {
       const res = await axios.post(`${API_BASE}/api/copilot/summary`, {
         query: "",
-        mode: copilotMode,
+        mode: "Gemini",
         gemini_key: geminiKey,
       });
       setCopilotMessages((prev) => [
@@ -414,7 +428,6 @@ export default function ObservabilityDashboard() {
     }
   };
 
-  // Ingestion Submit
   const handleIngestSubmit = async (e: FormEvent) => {
     e.preventDefault();
     if (!csvFile) return;
@@ -450,7 +463,7 @@ export default function ObservabilityDashboard() {
   if (!mounted) return null;
 
   // -------------------------------------------------------------
-  // DEMO-ABLE LOGIN SCREEN
+  // LOGIN SCREEN
   // -------------------------------------------------------------
   if (!isAuthenticated) {
     return (
@@ -469,9 +482,6 @@ export default function ObservabilityDashboard() {
               <div className="flex items-center justify-center gap-2">
                 <span className="font-bold text-2xl tracking-tight bg-clip-text text-transparent bg-gradient-to-r from-white via-slate-100 to-slate-400">
                   ConfigIntel
-                </span>
-                <span className="text-[10px] uppercase font-mono tracking-wider px-2 py-0.5 rounded bg-indigo-500/10 border border-indigo-500/20 text-indigo-400">
-                  Core
                 </span>
               </div>
               <p className="text-xs text-indigo-300/80 font-medium tracking-wide mt-1">
@@ -497,7 +507,7 @@ export default function ObservabilityDashboard() {
                   value={loginUsername}
                   onChange={(e) => setLoginUsername(e.target.value)}
                   className="bg-transparent w-full focus:outline-none"
-                  placeholder="e.g. verif_engineer_01"
+                  placeholder="Enter Username"
                 />
               </div>
             </div>
@@ -512,7 +522,7 @@ export default function ObservabilityDashboard() {
                   value={loginPassword}
                   onChange={(e) => setLoginPassword(e.target.value)}
                   className="bg-transparent w-full focus:outline-none"
-                  placeholder="Enter access token"
+                  placeholder="Enter Password"
                 />
               </div>
             </div>
@@ -526,15 +536,47 @@ export default function ObservabilityDashboard() {
           </form>
 
           <div className="pt-2 border-t border-slate-800/80 text-center">
-            <span className="text-[11px] text-slate-500">
-              Demo Access Enabled • Single-click sign-in active
-            </span>
+            <button
+              onClick={() => setShowAboutModal(true)}
+              className="text-xs text-indigo-400 hover:text-indigo-300 font-medium transition-colors"
+            >
+              About ConfigIntel
+            </button>
           </div>
         </div>
+
+        {/* Login Screen About Modal */}
+        {showAboutModal && (
+          <div
+            onClick={() => setShowAboutModal(false)}
+            className="fixed inset-0 z-50 bg-black/75 backdrop-blur-sm flex items-center justify-center p-4 animate-fadeIn"
+          >
+            <div
+              onClick={(e) => e.stopPropagation()}
+              className="bg-[#0b1120] border border-slate-800 rounded-2xl max-w-lg w-full p-6 shadow-2xl flex flex-col gap-5 relative z-50"
+            >
+              <div className="flex items-center justify-between pb-3 border-b border-slate-800">
+                <h3 className="font-semibold text-slate-100 text-sm flex items-center gap-2">
+                  <Sparkles className="h-4 w-4 text-indigo-400" />
+                  About ConfigIntel
+                </h3>
+                <button onClick={() => setShowAboutModal(false)} className="text-slate-400 hover:text-white">
+                  <X className="h-4 w-4" />
+                </button>
+              </div>
+              <div className="prose prose-invert prose-sm text-slate-300 max-h-[60vh] overflow-y-auto pr-2">
+                <p>
+                  {/* PLEASE PASTE THE ATTACHED ABOUT INFORMATION HERE */}
+                  ConfigIntel is an enterprise-grade execution log and parameter analytics platform designed to uncover
+                  hardware verification insights, PPA tradeoffs, and simulation failures using AI and GenAI.
+                </p>
+              </div>
+            </div>
+          </div>
+        )}
       </div>
     );
   }
-
   // -------------------------------------------------------------
   // MAIN WORKSPACE INTERFACE
   // -------------------------------------------------------------
@@ -552,9 +594,6 @@ export default function ObservabilityDashboard() {
             <div className="flex items-center gap-2">
               <span className="font-bold text-lg tracking-tight bg-clip-text text-transparent bg-gradient-to-r from-white via-slate-200 to-slate-400">
                 ConfigIntel
-              </span>
-              <span className="text-[10px] uppercase font-mono tracking-wider px-1.5 py-0.5 rounded bg-indigo-500/10 border border-indigo-500/20 text-indigo-400">
-                Observability
               </span>
             </div>
             <p className="text-xs text-indigo-300/80 font-medium">Verification Logs Analyser</p>
@@ -598,7 +637,7 @@ export default function ObservabilityDashboard() {
       {/* THREE-PANEL DESKTOP BODY */}
       <div className="flex-1 flex overflow-hidden">
         {/* LEFT PANEL: NAVIGATION & USER PROFILE */}
-        <aside className="w-64 border-r border-slate-800/80 bg-[#070b16] flex flex-col justify-between p-3 shrink-0 select-none">
+        <aside className="w-64 border-r border-slate-800/80 bg-[#070b16] flex flex-col justify-between p-3 shrink-0 select-none z-10">
           <div className="flex flex-col gap-1.5">
             <div className="px-3 py-2 text-[11px] font-semibold uppercase tracking-wider text-slate-500 font-mono">
               Workspaces
@@ -673,7 +712,7 @@ export default function ObservabilityDashboard() {
                 </div>
                 <div className="overflow-hidden text-left">
                   <div className="text-xs font-semibold text-slate-200 truncate">
-                    {loginUsername}
+                    {loginUsername || "verification_lead"}
                   </div>
                   <div className="text-[10px] text-emerald-400 font-mono">EDA Lead Active</div>
                 </div>
@@ -682,7 +721,6 @@ export default function ObservabilityDashboard() {
             </div>
           </div>
         </aside>
-
         {/* CENTER PANEL: DATA WORKSPACE */}
         <main className="flex-1 overflow-y-auto p-6 flex flex-col gap-6 transition-all duration-300">
           {errorMsg && (
@@ -864,7 +902,6 @@ export default function ObservabilityDashboard() {
                             tickLine={false}
                             domain={[0, "auto"]}
                           />
-                          {/* Y-COORDINATES IN SOLID WHITE */}
                           <YAxis
                             type="category"
                             dataKey="Feature"
@@ -993,7 +1030,6 @@ export default function ObservabilityDashboard() {
                   </div>
 
                   <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-                    {/* Card 1: XGBoost Native Importance */}
                     <div className="bg-slate-900/70 border border-slate-800 rounded-xl p-4 flex flex-col gap-3 group hover:border-slate-700 transition-all">
                       <div className="flex items-center justify-between">
                         <span className="text-xs font-semibold text-slate-200">
@@ -1030,7 +1066,6 @@ export default function ObservabilityDashboard() {
                       </div>
                     </div>
 
-                    {/* Card 2: SHAP Beeswarm */}
                     <div className="bg-slate-900/70 border border-slate-800 rounded-xl p-4 flex flex-col gap-3 group hover:border-slate-700 transition-all">
                       <div className="flex items-center justify-between">
                         <span className="text-xs font-semibold text-slate-200">
@@ -1215,7 +1250,6 @@ export default function ObservabilityDashboard() {
                   </div>
                 </div>
 
-                {/* Console Trace Stream */}
                 <div className="lg:col-span-5 flex flex-col gap-4">
                   <div className="bg-[#0b1120] border border-slate-800 rounded-xl p-4 shadow-md flex flex-col gap-3">
                     <div className="flex items-center justify-between pb-2 border-b border-slate-800">
@@ -1398,12 +1432,21 @@ export default function ObservabilityDashboard() {
             </div>
           )}
         </main>
-
-        {/* RIGHT PANEL: ANTIGRAVITY-INSPIRED AI COPILOT DRAWER */}
+{/* RIGHT PANEL: ANTIGRAVITY-INSPIRED AI COPILOT DRAWER */}
         {rightPanelOpen && (
-          <aside className="w-[420px] border-l border-slate-800/80 bg-[#080d1a] flex flex-col shrink-0 shadow-2xl animate-fadeIn transition-all">
+          <aside
+            style={{ width: rightPanelWidth }}
+            className="relative border-l border-slate-800/80 bg-[#080d1a] flex flex-col shrink-0 shadow-2xl animate-fadeIn transition-none"
+          >
+            {/* Sliding Resize Handle */}
+            <div
+              onMouseDown={() => setIsDraggingRightPanel(true)}
+              className="absolute left-0 top-0 bottom-0 w-1.5 cursor-col-resize hover:bg-indigo-500/50 z-50 transition-colors"
+              title="Drag to resize panel"
+            />
+
             {/* Header */}
-            <div className="p-3.5 border-b border-slate-800 flex items-center justify-between bg-slate-900/60">
+            <div className="p-3.5 border-b border-slate-800 flex items-center justify-between bg-slate-900/60 pl-4">
               <div className="flex items-center gap-2">
                 <Bot className="h-4 w-4 text-indigo-400" />
                 <span className="text-xs font-semibold text-white tracking-wide">
@@ -1423,18 +1466,17 @@ export default function ObservabilityDashboard() {
             </div>
 
             {/* Scrollable Diagnostic Body */}
-            <div className="flex-1 overflow-y-auto p-4 flex flex-col gap-4 text-xs">
-              {/* Automated Diagnostic Cards */}
-              <div className="bg-slate-900/80 border border-slate-800 rounded-xl p-3.5 flex flex-col gap-2.5 shadow-sm">
-                <div className="flex items-center justify-between text-indigo-300 font-semibold border-b border-slate-800/80 pb-1.5">
-                  <span className="flex items-center gap-1.5">
-                    <AlertTriangle className="h-3.5 w-3.5 text-rose-400" />
-                    Automated Error & Warning Triage
-                  </span>
-                </div>
-                <div className="text-slate-300 leading-relaxed font-sans">
-                  {dashboardData ? (
-                    <span>
+            <div className="flex-1 overflow-y-auto p-4 flex flex-col gap-4 text-xs pl-5">
+              {dashboardData && dashboardData.kpis.total_runs > 0 ? (
+                <>
+                  <div className="bg-slate-900/80 border border-slate-800 rounded-xl p-3.5 flex flex-col gap-2.5 shadow-sm">
+                    <div className="flex items-center justify-between text-indigo-300 font-semibold border-b border-slate-800/80 pb-1.5">
+                      <span className="flex items-center gap-1.5">
+                        <AlertTriangle className="h-3.5 w-3.5 text-rose-400" />
+                        Automated Error & Warning Triage
+                      </span>
+                    </div>
+                    <div className="text-slate-300 leading-relaxed font-sans">
                       Detected{" "}
                       <strong className="text-rose-400">
                         {Math.round(
@@ -1446,75 +1488,55 @@ export default function ObservabilityDashboard() {
                         Feature_Flag_X
                       </code>{" "}
                       participates in ~78% of fatal log events.
-                    </span>
-                  ) : (
-                    "Upload logs to compute real-time triage."
-                  )}
-                </div>
-              </div>
+                    </div>
+                  </div>
 
-              <div className="bg-slate-900/80 border border-slate-800 rounded-xl p-3.5 flex flex-col gap-2.5 shadow-sm">
-                <div className="flex items-center justify-between text-indigo-300 font-semibold border-b border-slate-800/80 pb-1.5">
-                  <span className="flex items-center gap-1.5">
-                    <Sparkles className="h-3.5 w-3.5 text-emerald-400" />
-                    Performance Optimization Solution
+                  <div className="bg-slate-900/80 border border-slate-800 rounded-xl p-3.5 flex flex-col gap-2.5 shadow-sm">
+                    <div className="flex items-center justify-between text-indigo-300 font-semibold border-b border-slate-800/80 pb-1.5">
+                      <span className="flex items-center gap-1.5">
+                        <Sparkles className="h-3.5 w-3.5 text-emerald-400" />
+                        Performance Optimization Solution
+                      </span>
+                    </div>
+                    <div className="text-slate-300 leading-relaxed font-sans">
+                      Switch <code className="text-emerald-300 font-mono">Cache_Policy</code> to{" "}
+                      <strong>Adaptive</strong> and pair with <strong>Dynamic Scheduler</strong> to yield a{" "}
+                      <strong className="text-emerald-400">22% throughput increase</strong> and zero assertion
+                      faults in benchmark suites.
+                    </div>
+                  </div>
+                </>
+              ) : (
+                <div className="bg-slate-900/40 border border-slate-800 border-dashed rounded-xl p-5 flex flex-col items-center justify-center gap-2 text-center">
+                  <Bot className="h-6 w-6 text-slate-500" />
+                  <span className="text-slate-400 text-xs">
+                    Upload telemetry to unlock automated diagnostics and optimization strategies.
                   </span>
                 </div>
-                <div className="text-slate-300 leading-relaxed font-sans">
-                  Switch <code className="text-emerald-300 font-mono">Cache_Policy</code> to{" "}
-                  <strong>Adaptive</strong> and pair with <strong>Dynamic Scheduler</strong> to yield a{" "}
-                  <strong className="text-emerald-400">22% throughput increase</strong> and zero assertion
-                  faults in benchmark suites.
-                </div>
-              </div>
+              )}
 
-              {/* Mode & Gemini Key Input */}
+              {/* Action Buttons */}
               <div className="flex items-center justify-between gap-2 pt-1">
-                <div className="flex items-center bg-slate-950 border border-slate-800 p-0.5 rounded-lg text-[11px]">
-                  <button
-                    onClick={() => setCopilotMode("Native")}
-                    className={`px-2.5 py-1 rounded-md font-medium transition-all ${
-                      copilotMode === "Native"
-                        ? "bg-indigo-600 text-white"
-                        : "text-slate-400 hover:text-slate-200"
-                    }`}
-                  >
-                    SHAP
-                  </button>
-                  <button
-                    onClick={() => setCopilotMode("Gemini")}
-                    className={`px-2.5 py-1 rounded-md font-medium transition-all ${
-                      copilotMode === "Gemini"
-                        ? "bg-indigo-600 text-white"
-                        : "text-slate-400 hover:text-slate-200"
-                    }`}
-                  >
-                    Gemini Flash
-                  </button>
-                </div>
-
                 <button
                   onClick={handleGenerateSummary}
                   disabled={summaryLoading}
-                  className="px-2.5 py-1 rounded-lg bg-indigo-600/20 hover:bg-indigo-600/30 text-indigo-300 border border-indigo-500/30 font-medium text-[11px] flex items-center gap-1"
+                  className="px-2.5 py-1.5 rounded-lg bg-indigo-600/20 hover:bg-indigo-600/30 text-indigo-300 border border-indigo-500/30 font-medium text-[11px] flex items-center gap-1.5 w-full justify-center transition-colors"
                 >
-                  <Sparkles className={`h-3 w-3 ${summaryLoading ? "animate-spin" : ""}`} />
-                  Generate Summary
+                  <Sparkles className={`h-3.5 w-3.5 ${summaryLoading ? "animate-spin" : ""}`} />
+                  Generate Comprehensive Executive Summary
                 </button>
               </div>
 
-              {copilotMode === "Gemini" && (
-                <div className="flex items-center gap-2 bg-slate-950 border border-slate-800 rounded-lg px-2.5 py-1.5 text-xs">
-                  <Key className="h-3.5 w-3.5 text-slate-400 shrink-0" />
-                  <input
-                    type="password"
-                    placeholder="Enter Gemini API Key (Optional)"
-                    value={geminiKey}
-                    onChange={(e) => setGeminiKey(e.target.value)}
-                    className="bg-transparent w-full focus:outline-none text-slate-200 font-mono text-[11px]"
-                  />
-                </div>
-              )}
+              <div className="flex items-center gap-2 bg-slate-950 border border-slate-800 rounded-lg px-2.5 py-1.5 text-xs">
+                <Key className="h-3.5 w-3.5 text-slate-400 shrink-0" />
+                <input
+                  type="password"
+                  placeholder="Enter Gemini API Key (Optional)"
+                  value={geminiKey}
+                  onChange={(e) => setGeminiKey(e.target.value)}
+                  className="bg-transparent w-full focus:outline-none text-slate-200 font-mono text-[11px]"
+                />
+              </div>
 
               {/* Chat Thread */}
               <div className="flex-1 flex flex-col gap-3 min-h-[180px]">
@@ -1540,8 +1562,8 @@ export default function ObservabilityDashboard() {
             </div>
 
             {/* Input Bar */}
-            <div className="p-3 border-t border-slate-800 bg-slate-900/60 flex flex-col gap-2">
-              <div className="flex items-center gap-1.5 overflow-x-auto pb-1 text-[10px] text-slate-400">
+            <div className="p-3 border-t border-slate-800 bg-slate-900/60 flex flex-col gap-2 pl-4">
+              <div className="flex items-center gap-1.5 overflow-x-auto pb-1 text-[10px] text-slate-400 scrollbar-hide">
                 {["Feature_Flag_X", "Random_Seed_Group", "Memory_Alloc_64GB"].map((q) => (
                   <button
                     key={q}
@@ -1575,6 +1597,8 @@ export default function ObservabilityDashboard() {
         )}
       </div>
 
+      {/* MODALS */}
+      
       {/* USER PROFILE MODAL */}
       {showProfileModal && (
         <div
@@ -1598,7 +1622,7 @@ export default function ObservabilityDashboard() {
             <div className="flex flex-col gap-3 text-xs">
               <div className="flex justify-between py-1.5 border-b border-slate-800/60">
                 <span className="text-slate-400">Engineer ID:</span>
-                <span className="font-mono text-slate-200 font-semibold">{loginUsername}</span>
+                <span className="font-mono text-slate-200 font-semibold">{loginUsername || "verification_lead"}</span>
               </div>
               <div className="flex justify-between py-1.5 border-b border-slate-800/60">
                 <span className="text-slate-400">Workspace Role:</span>
@@ -1607,10 +1631,6 @@ export default function ObservabilityDashboard() {
               <div className="flex justify-between py-1.5 border-b border-slate-800/60">
                 <span className="text-slate-400">Target Architecture:</span>
                 <span className="font-mono text-slate-200">SystemVerilog / UVM</span>
-              </div>
-              <div className="flex justify-between py-1.5 border-b border-slate-800/60">
-                <span className="text-slate-400">API Endpoint:</span>
-                <span className="font-mono text-emerald-400 truncate max-w-[170px]">{API_BASE}</span>
               </div>
             </div>
 
