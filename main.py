@@ -152,6 +152,29 @@ async def get_plot(filename: str):
     raise HTTPException(status_code=404, detail=f"Plot {filename} not found")
 
 
+def _complete_with_openrouter(client, messages, temperature=0.2):
+    """Attempts primary nvidia/nemotron-3.5-lightning:free with automatic free-tier fallback."""
+    models_to_try = [
+        "nvidia/nemotron-3.5-lightning:free",
+        "openrouter/free",
+        "meta-llama/llama-3.3-70b-instruct:free",
+    ]
+    last_err = None
+    for model_id in models_to_try:
+        try:
+            return client.chat.completions.create(
+                model=model_id,
+                messages=messages,
+                temperature=temperature,
+            )
+        except Exception as e:
+            last_err = e
+            err_str = str(e).lower()
+            if "404" in err_str or "no endpoints found" in err_str or "not found" in err_str or "429" in err_str or "503" in err_str:
+                continue
+            raise e
+    raise last_err
+
 @app.post("/api/copilot/chat")
 async def copilot_chat(payload: CopilotChatRequest):
     # Use the injected environment variable, or the UI input box if provided
@@ -181,8 +204,8 @@ async def copilot_chat(payload: CopilotChatRequest):
     )
 
     try:
-        response = active_client.chat.completions.create(
-            model="nvidia/llama-3.1-nemotron-70b-instruct:free",
+        response = _complete_with_openrouter(
+            client=active_client,
             messages=[
                 {"role": "system", "content": system_instruction},
                 {"role": "user", "content": payload.query}
@@ -223,8 +246,8 @@ async def copilot_summary(payload: CopilotSummaryRequest):
     )
 
     try:
-        response = active_client.chat.completions.create(
-            model="nvidia/llama-3.1-nemotron-70b-instruct:free",
+        response = _complete_with_openrouter(
+            client=active_client,
             messages=[
                 {"role": "system", "content": "You are a verification engineering AI."},
                 {"role": "user", "content": summary_prompt}
