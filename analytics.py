@@ -68,8 +68,11 @@ class ConfigAnalyticsEngine:
 
         self._ensure_critical_columns()
 
-        exclude_cols = ['Run_ID', 'Config_ID', 'Outcome_Binary', 'Status', 'Execution_Time_sec', 'Throughput_MBps', 'Peak_Memory_GB']
-        feature_cols = [c for c in self.df.columns if c not in exclude_cols]
+        target_and_meta = [
+            'run_id', 'config_id', 'outcome_binary', 'status', 'outcome', 
+            'result', 'error_type', 'execution_time_sec', 'throughput_mbps', 'peak_memory_gb'
+        ]
+        feature_cols = [c for c in self.df.columns if str(c).strip().lower() not in target_and_meta]
         
         if not feature_cols or 'Outcome_Binary' not in self.df.columns:
             return

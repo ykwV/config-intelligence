@@ -1003,12 +1003,23 @@ export default function ObservabilityDashboard() {
                                                     <BarChart
                                                         layout="vertical"
                                                         data={dashboardData.shap_metrics}
-                                                        margin={{ top: 10, right: 30, left: 100, bottom: 5 }}
+                                                        /* 1. Reduced left margin since the YAxis width now handles the spacing */
+                                                        margin={{ top: 10, right: 30, left: 10, bottom: 5 }}
                                                     >
                                                         <XAxis type="number" stroke="#64748b" fontSize={11} tickLine={false} domain={[0, "auto"]} />
-                                                        <YAxis type="category" dataKey="Feature" stroke="#ffffff" tick={{ fill: "#ffffff", fontSize: 11, fontWeight: 600 }} tickLine={false} axisLine={{ stroke: "#475569" }} width={120} />
+                                                        <YAxis 
+                                                            type="category" 
+                                                            dataKey="Feature" 
+                                                            stroke="#ffffff" 
+                                                            tick={{ fill: "#ffffff", fontSize: 11, fontWeight: 600 }} 
+                                                            tickLine={false} 
+                                                            axisLine={{ stroke: "#475569" }} 
+                                                            /* 2. Increased width to 170px to accommodate longer hardware parameter names */
+                                                            width={170} 
+                                                            /* 3. Added a tickFormatter to safely truncate strings over 24 characters */
+                                                            tickFormatter={(value) => (value.length > 24 ? `${value.substring(0, 24)}...` : value)}
+                                                        />
                                                         <Tooltip cursor={{ fill: "rgba(99, 102, 241, 0.08)" }} wrapperStyle={{ outline: "none", zIndex: 100 }} content={<CustomShapTooltip />} />
-                                                        {/* Disable animation to prevent 0-width mounting glitches */}
                                                         <Bar dataKey="Importance_Score" radius={[0, 4, 4, 0]} isAnimationActive={false}>
                                                             {dashboardData.shap_metrics?.map((entry, index) => {
                                                                 const isRisk = entry.Impact_Direction?.includes("Increases") || entry.Impact_Direction?.includes("Risk");
