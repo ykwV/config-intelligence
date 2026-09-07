@@ -6,8 +6,7 @@ from fastapi.responses import FileResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 import uvicorn
-from google import genai
-from google.genai import types
+from openai import OpenAI
 
 from analytics import ConfigAnalyticsEngine
 
@@ -21,9 +20,12 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Initialize Gemini Client using the environment variable GEMINI_API_KEY
-gemini_api_key = os.environ.get("GEMINI_API_KEY")
-gemini_client = genai.Client(api_key=gemini_api_key) if gemini_api_key else None
+# Initialize OpenRouter Client
+openrouter_api_key = os.environ.get("OPENROUTER_API_KEY")
+or_client = OpenAI(
+    base_url="https://openrouter.ai/api/v1",
+    api_key=openrouter_api_key,
+) if openrouter_api_key else None
 
 class CopilotChatRequest(BaseModel):
     query: str
@@ -152,16 +154,23 @@ async def get_plot(filename: str):
 
 @app.post("/api/copilot/chat")
 async def copilot_chat(payload: CopilotChatRequest):
-    client = gemini_client
+    # Use the injected environment variable, or the UI input box if provided
+    active_client = or_client
     if payload.gemini_key:
-        client = genai.Client(api_key=payload.gemini_key)
-    elif not client and os.environ.get("GEMINI_API_KEY"):
-        client = genai.Client(api_key=os.environ.get("GEMINI_API_KEY"))
+        active_client = OpenAI(
+            base_url="https://openrouter.ai/api/v1",
+            api_key=payload.gemini_key,
+        )
+    elif not active_client and os.environ.get("OPENROUTER_API_KEY"):
+        active_client = OpenAI(
+            base_url="https://openrouter.ai/api/v1",
+            api_key=os.environ.get("OPENROUTER_API_KEY"),
+        )
 
-    if not client:
+    if not active_client:
         raise HTTPException(
             status_code=500,
-            detail="Gemini API Key is not configured on the server. Please set GEMINI_API_KEY in Render."
+            detail="OpenRouter API Key missing. Please set OPENROUTER_API_KEY in Render."
         )
 
     system_instruction = (
@@ -172,46 +181,36 @@ async def copilot_chat(payload: CopilotChatRequest):
     )
 
     try:
-        # Primary Attempt
-        response = client.models.generate_content(
-            model="gemini-2.5-flash",
-            contents=payload.query,
-            config=types.GenerateContentConfig(
-                system_instruction=system_instruction,
-                temperature=0.2,
-            )
+        response = active_client.chat.completions.create(
+            model="nvidia/llama-3.1-nemotron-70b-instruct:free",
+            messages=[
+                {"role": "system", "content": system_instruction},
+                {"role": "user", "content": payload.query}
+            ],
+            temperature=0.2,
         )
-        return {"response": response.text}
+        return {"response": response.choices[0].message.content}
     except Exception as e:
-        # Model Fallback Mechanism
-        err_str = str(e).upper()
-        if "503" in err_str or "UNAVAILABLE" in err_str or "404" in err_str or "NOT_FOUND" in err_str:
-            try:
-                response = client.models.generate_content(
-                    model="gemini-1.5-flash",
-                    contents=payload.query,
-                    config=types.GenerateContentConfig(
-                        system_instruction=system_instruction,
-                        temperature=0.2,
-                    )
-                )
-                return {"response": response.text}
-            except Exception as fallback_e:
-                raise HTTPException(status_code=503, detail=f"All models overloaded. Error: {str(fallback_e)}")
-        raise HTTPException(status_code=500, detail=f"Gemini API Error: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"OpenRouter API Error: {str(e)}")
 
 @app.post("/api/copilot/summary")
 async def copilot_summary(payload: CopilotSummaryRequest):
-    client = gemini_client
+    active_client = or_client
     if payload.gemini_key:
-        client = genai.Client(api_key=payload.gemini_key)
-    elif not client and os.environ.get("GEMINI_API_KEY"):
-        client = genai.Client(api_key=os.environ.get("GEMINI_API_KEY"))
+        active_client = OpenAI(
+            base_url="https://openrouter.ai/api/v1",
+            api_key=payload.gemini_key,
+        )
+    elif not active_client and os.environ.get("OPENROUTER_API_KEY"):
+        active_client = OpenAI(
+            base_url="https://openrouter.ai/api/v1",
+            api_key=os.environ.get("OPENROUTER_API_KEY"),
+        )
 
-    if not client:
+    if not active_client:
         raise HTTPException(
             status_code=500,
-            detail="Gemini API Key is not configured on the server. Please set GEMINI_API_KEY in Render."
+            detail="OpenRouter API Key missing. Please set OPENROUTER_API_KEY in Render."
         )
 
     summary_prompt = (
@@ -224,25 +223,17 @@ async def copilot_summary(payload: CopilotSummaryRequest):
     )
 
     try:
-        response = client.models.generate_content(
-            model="gemini-2.5-flash",
-            contents=summary_prompt,
-            config=types.GenerateContentConfig(temperature=0.2)
+        response = active_client.chat.completions.create(
+            model="nvidia/llama-3.1-nemotron-70b-instruct:free",
+            messages=[
+                {"role": "system", "content": "You are a verification engineering AI."},
+                {"role": "user", "content": summary_prompt}
+            ],
+            temperature=0.2,
         )
-        return {"summary": response.text}
+        return {"summary": response.choices[0].message.content}
     except Exception as e:
-        err_str = str(e).upper()
-        if "503" in err_str or "UNAVAILABLE" in err_str or "404" in err_str or "NOT_FOUND" in err_str:
-            try:
-                response = client.models.generate_content(
-                    model="gemini-1.5-flash",
-                    contents=summary_prompt,
-                    config=types.GenerateContentConfig(temperature=0.2)
-                )
-                return {"summary": response.text}
-            except Exception as fallback_e:
-                raise HTTPException(status_code=503, detail=f"All models overloaded. Error: {str(fallback_e)}")
-        raise HTTPException(status_code=500, detail=f"Gemini API Error: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"OpenRouter API Error: {str(e)}")
 
 if __name__ == "__main__":
     uvicorn.run(app, host="0.0.0.0", port=8000)

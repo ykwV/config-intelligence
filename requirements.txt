@@ -5,4 +5,4 @@ xgboost
 shap
 pandas
 numpy
-google-genai
+openai
