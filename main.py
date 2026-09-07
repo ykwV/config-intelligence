@@ -1,16 +1,13 @@
 import os
 import json
-from typing import Optional
+from typing import Optional, List, Dict, Any
 from fastapi import FastAPI, UploadFile, File, HTTPException, Query
 from fastapi.responses import FileResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 import uvicorn
-
-try:
-    from google import genai
-except ImportError:
-    genai = None
+from google import genai
+from google.genai import types
 
 from analytics import ConfigAnalyticsEngine
 
@@ -24,16 +21,28 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# Initialize Gemini Client using the environment variable GEMINI_API_KEY
+gemini_api_key = os.environ.get("GEMINI_API_KEY")
+gemini_client = genai.Client(api_key=gemini_api_key) if gemini_api_key else None
+
+class CopilotChatRequest(BaseModel):
+    query: str
+    mode: Optional[str] = "Gemini"
+    gemini_key: Optional[str] = None
+
+class CopilotSummaryRequest(BaseModel):
+    query: Optional[str] = ""
+    mode: Optional[str] = "Gemini"
+    gemini_key: Optional[str] = None
+
+# Backwards compatibility alias
+ChatRequest = CopilotChatRequest
+
 # Initialize engine with default datasets if available on disk
 engine = ConfigAnalyticsEngine(
     csv_path="execution_data_master.csv", 
     jsonl_path="system_execution_logs.jsonl"
 )
-
-class ChatRequest(BaseModel):
-    query: str = ""
-    gemini_key: str = ""
-    mode: str = "Gemini"
 
 @app.get("/api/health")
 async def health_check():
@@ -119,117 +128,70 @@ async def get_shap_chart():
     raise HTTPException(status_code=404, detail="Chart not found")
 
 
-def _generate_fallback_summary() -> str:
-    """Generates an intelligent executive summary directly from SHAP and statistical metrics."""
-    total = len(engine.df)
-    fails = int((engine.df['Status'] == 'FAIL').sum())
-    fail_rate = (fails / total * 100) if total > 0 else 0
-    top_shap = engine.feature_importance_df.head(5).to_dict(orient='records')
-    top_drivers = ", ".join([f"`{r['Feature']}` ({r['Impact_Direction']}, score: {r['Importance_Score']:.3f})" for r in top_shap[:3]])
-    
-    return f"""### 1. System AI Summary
-- **Overall System Reliability:** {100 - fail_rate:.2f}% across **{total:,}** executions ({fails:,} failures, {fail_rate:.2f}% failure rate).
-- **Primary Failure Attribution:** High SHAP risk concentration in {top_drivers}.
-- **Regression Profile:** High-risk combinations correlate with experimental feature branches and resource-constrained nodes.
+@app.post("/api/copilot/chat")
+async def copilot_chat(payload: CopilotChatRequest):
+    # Select client: either request-level key or backend environment variable
+    client = gemini_client
+    if payload.gemini_key:
+        client = genai.Client(api_key=payload.gemini_key)
 
-### 2. Current Drawbacks & Flaws
-- **Feature Flag X Instability:** Strongly increases failure probability (~78% representation in failing executions).
-- **Entropy Anomalies:** `Random_Seed_Group = 8` induces edge-case race conditions and timing hazards.
-- **Memory Saturation:** 16GB memory allocations paired with Write-Heavy workloads suffer heap pressure, leading to `ERR_MEM_OVERFLOW` terminations.
+    if not client:
+        raise HTTPException(
+            status_code=500,
+            detail="Gemini API Key is not configured on the server. Please set GEMINI_API_KEY in Render."
+        )
 
-### 3. Performance Improving Solutions
-- **Pareto-Optimal Architecture:** Standardize on **Adaptive Cache Policy** combined with **Dynamic Scheduler** to gain **~22% higher throughput** and reduced latency.
-- **Resource Re-allocation:** Promote nodes to **32GB / 64GB** allocations to eliminate write buffer starvation.
-- **Targeted Gating:** Gate `Feature_Flag_X` behind canary environments and deprecate `Random_Seed_Group 8` configurations.
-"""
+    # Verification engineering context injected into every query
+    system_instruction = (
+        "You are the senior EDA & hardware verification assistant inside ConfigIntel. "
+        "You analyze simulation execution logs, PPA tradeoffs (latency, throughput, peak memory), "
+        "and SHAP parameter risk attributions. Provide precise, actionable root-cause diagnoses, "
+        "pointing out assertions, memory bottlenecks, and suggested configuration fixes."
+    )
+
+    try:
+        response = client.models.generate_content(
+            model="gemini-2.5-flash",
+            contents=payload.query,
+            config=types.GenerateContentConfig(
+                system_instruction=system_instruction,
+                temperature=0.2,
+            )
+        )
+        return {"response": response.text}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Gemini API Error: {str(e)}")
 
 @app.post("/api/copilot/summary")
-async def copilot_summary(req: ChatRequest):
-    """Generates a 3-section executive verification summary using Gemini or internal intelligence."""
-    if engine.df.empty:
-        raise HTTPException(status_code=400, detail="No dataset loaded in engine.")
-        
-    api_key = req.gemini_key.strip() if req.gemini_key else os.environ.get("GEMINI_API_KEY", "").strip()
-    
-    if api_key and genai:
-        prompt = f"""
-        You are an elite AI Verification & Observability Engineer. Analyze this live system telemetry data:
-        {engine.get_system_context()}
-        
-        Output exactly 3 clear Markdown sections:
-        ### 1. System AI Summary
-        ### 2. Current Drawbacks & Flaws
-        ### 3. Performance Improving Solutions
-        
-        Cite SHAP weights and concrete parameters in your reasoning.
-        """
-        try:
-            client = genai.Client(api_key=api_key)
-            res = client.models.generate_content(model='gemini-2.5-flash', contents=prompt)
-            if res and res.text:
-                return {"summary": res.text}
-        except Exception as e:
-            # Fall back gracefully to statistical summary if Gemini API call has quota or auth issues
-            print(f"Gemini API invocation note: {e}. Falling back to analytical engine summary.")
-            
-    # Return rich deterministic analytical summary
-    return {"summary": _generate_fallback_summary()}
+async def copilot_summary(payload: CopilotSummaryRequest):
+    client = gemini_client
+    if payload.gemini_key:
+        client = genai.Client(api_key=payload.gemini_key)
 
-@app.post("/api/copilot/chat")
-async def copilot_chat(req: ChatRequest):
-    """Answers natural language observability queries."""
-    if engine.df.empty:
-        raise HTTPException(status_code=400, detail="No dataset loaded in engine.")
-        
-    if not req.query:
-        raise HTTPException(status_code=400, detail="Query string is required.")
+    if not client:
+        raise HTTPException(
+            status_code=500,
+            detail="Gemini API Key is not configured on the server. Please set GEMINI_API_KEY in Render."
+        )
 
-    # 1. Native XGBoost SHAP Metric Route
-    if req.mode == "Native":
-        matches = engine.search_shap_metrics(req.query)
-        if matches:
-            insights = []
-            for m in matches[:5]:
-                impact_emoji = "⚠️" if "Increases" in m['Impact_Direction'] else "✅"
-                insights.append(
-                    f"- **`{m['Feature']}`**: {m['Impact_Direction']} {impact_emoji} (SHAP Importance: `{m['Importance_Score']:.4f}`)."
-                )
-            res = f"**Native XGBoost SHAP Analysis for query '{req.query}':**\n\n" + "\n".join(insights)
-            return {"response": res}
-        return {"response": f"Parameter '{req.query}' was not identified among influential SHAP vectors. It exhibits low variance or minimal impact on failure rates."}
+    summary_prompt = (
+        "Generate a structured Executive Verification Summary for pre-silicon validation leads. "
+        "Include three distinct sections:\n"
+        "1. **Root Cause Failure Profile** (common assertion triggers, fatal memory limits, Feature_Flag_X impact)\n"
+        "2. **PPA Pareto Trade-Offs** (latency vs. memory usage and optimal throughput configs)\n"
+        "3. **Recommended Testbench Actions** (concrete register adjustments, cache policy tuning, dynamic scheduling)\n"
+        "Format cleanly with markdown bullet points."
+    )
 
-    # 2. Gemini GenAI Route
-    api_key = req.gemini_key.strip() if req.gemini_key else os.environ.get("GEMINI_API_KEY", "").strip()
-    if api_key and genai:
-        prompt = f"""
-        You are an elite OpenObserve AI Assistant.
-        System Context:
-        {engine.get_system_context()}
-        
-        User Query:
-        {req.query}
-        
-        Provide a concise, technical explanation using concrete parameters and SHAP impact scores.
-        """
-        try:
-            client = genai.Client(api_key=api_key)
-            res = client.models.generate_content(model='gemini-2.5-flash', contents=prompt)
-            if res and res.text:
-                return {"response": res.text}
-        except Exception as e:
-            print(f"Gemini chat notice: {e}. Falling back to native SHAP intelligence.")
-
-    # Fallback to smart parametric analysis
-    matches = engine.search_shap_metrics(req.query)
-    if matches:
-        top = matches[0]
-        direction = "significantly increases" if "Increases" in top['Impact_Direction'] else "significantly decreases"
-        return {
-            "response": f"**Analytical Assessment:** Telemetry analysis shows that `{top['Feature']}` {direction} system failure probability with an importance score of `{top['Importance_Score']:.4f}`. In accordance with pareto-optimal benchmarks, configuring systems with optimal cache/scheduler pairings provides higher resilience against this vector."
-        }
-    return {
-        "response": f"**System Assessment for '{req.query}':** No adverse correlations detected for this parameter across 10,000 runs. Review the Root Cause Diffs or Pareto Front for broader architectural tradeoffs."
-    }
+    try:
+        response = client.models.generate_content(
+            model="gemini-2.5-flash",
+            contents=summary_prompt,
+            config=types.GenerateContentConfig(temperature=0.2)
+        )
+        return {"summary": response.text}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Gemini API Error: {str(e)}")
 
 if __name__ == "__main__":
     uvicorn.run(app, host="0.0.0.0", port=8000)
