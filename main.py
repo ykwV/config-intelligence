@@ -128,12 +128,32 @@ async def get_shap_chart():
     raise HTTPException(status_code=404, detail="Chart not found")
 
 
+def _generate_with_fallback(client, contents, config=None):
+    models_to_try = ["gemini-2.5-flash", "gemini-3.6-flash", "gemini-2.0-flash"]
+    last_err = None
+    for model_name in models_to_try:
+        try:
+            return client.models.generate_content(
+                model=model_name,
+                contents=contents,
+                config=config,
+            )
+        except Exception as e:
+            last_err = e
+            err_str = str(e).lower()
+            if "404" in err_str or "not_found" in err_str or "not available" in err_str:
+                continue
+            raise e
+    raise last_err
+
 @app.post("/api/copilot/chat")
 async def copilot_chat(payload: CopilotChatRequest):
     # Select client: either request-level key or backend environment variable
     client = gemini_client
     if payload.gemini_key:
         client = genai.Client(api_key=payload.gemini_key)
+    elif not client and os.environ.get("GEMINI_API_KEY"):
+        client = genai.Client(api_key=os.environ.get("GEMINI_API_KEY"))
 
     if not client:
         raise HTTPException(
@@ -150,8 +170,8 @@ async def copilot_chat(payload: CopilotChatRequest):
     )
 
     try:
-        response = client.models.generate_content(
-            model="gemini-2.5-flash",
+        response = _generate_with_fallback(
+            client=client,
             contents=payload.query,
             config=types.GenerateContentConfig(
                 system_instruction=system_instruction,
@@ -167,6 +187,8 @@ async def copilot_summary(payload: CopilotSummaryRequest):
     client = gemini_client
     if payload.gemini_key:
         client = genai.Client(api_key=payload.gemini_key)
+    elif not client and os.environ.get("GEMINI_API_KEY"):
+        client = genai.Client(api_key=os.environ.get("GEMINI_API_KEY"))
 
     if not client:
         raise HTTPException(
@@ -184,8 +206,8 @@ async def copilot_summary(payload: CopilotSummaryRequest):
     )
 
     try:
-        response = client.models.generate_content(
-            model="gemini-2.5-flash",
+        response = _generate_with_fallback(
+            client=client,
             contents=summary_prompt,
             config=types.GenerateContentConfig(temperature=0.2)
         )
