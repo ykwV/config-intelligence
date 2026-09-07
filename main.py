@@ -128,27 +128,8 @@ async def get_shap_chart():
     raise HTTPException(status_code=404, detail="Chart not found")
 
 
-def _generate_with_fallback(client, contents, config=None):
-    models_to_try = ["gemini-2.5-flash", "gemini-3.6-flash", "gemini-2.0-flash"]
-    last_err = None
-    for model_name in models_to_try:
-        try:
-            return client.models.generate_content(
-                model=model_name,
-                contents=contents,
-                config=config,
-            )
-        except Exception as e:
-            last_err = e
-            err_str = str(e).lower()
-            if "404" in err_str or "not_found" in err_str or "not available" in err_str:
-                continue
-            raise e
-    raise last_err
-
 @app.post("/api/copilot/chat")
 async def copilot_chat(payload: CopilotChatRequest):
-    # Select client: either request-level key or backend environment variable
     client = gemini_client
     if payload.gemini_key:
         client = genai.Client(api_key=payload.gemini_key)
@@ -161,7 +142,6 @@ async def copilot_chat(payload: CopilotChatRequest):
             detail="Gemini API Key is not configured on the server. Please set GEMINI_API_KEY in Render."
         )
 
-    # Verification engineering context injected into every query
     system_instruction = (
         "You are the senior EDA & hardware verification assistant inside ConfigIntel. "
         "You analyze simulation execution logs, PPA tradeoffs (latency, throughput, peak memory), "
@@ -170,8 +150,9 @@ async def copilot_chat(payload: CopilotChatRequest):
     )
 
     try:
-        response = _generate_with_fallback(
-            client=client,
+        # Primary Attempt
+        response = client.models.generate_content(
+            model="gemini-2.5-flash",
             contents=payload.query,
             config=types.GenerateContentConfig(
                 system_instruction=system_instruction,
@@ -180,6 +161,21 @@ async def copilot_chat(payload: CopilotChatRequest):
         )
         return {"response": response.text}
     except Exception as e:
+        # Model Fallback Mechanism
+        err_str = str(e).upper()
+        if "503" in err_str or "UNAVAILABLE" in err_str or "404" in err_str or "NOT_FOUND" in err_str:
+            try:
+                response = client.models.generate_content(
+                    model="gemini-1.5-flash",
+                    contents=payload.query,
+                    config=types.GenerateContentConfig(
+                        system_instruction=system_instruction,
+                        temperature=0.2,
+                    )
+                )
+                return {"response": response.text}
+            except Exception as fallback_e:
+                raise HTTPException(status_code=503, detail=f"All models overloaded. Error: {str(fallback_e)}")
         raise HTTPException(status_code=500, detail=f"Gemini API Error: {str(e)}")
 
 @app.post("/api/copilot/summary")
@@ -206,13 +202,24 @@ async def copilot_summary(payload: CopilotSummaryRequest):
     )
 
     try:
-        response = _generate_with_fallback(
-            client=client,
+        response = client.models.generate_content(
+            model="gemini-2.5-flash",
             contents=summary_prompt,
             config=types.GenerateContentConfig(temperature=0.2)
         )
         return {"summary": response.text}
     except Exception as e:
+        err_str = str(e).upper()
+        if "503" in err_str or "UNAVAILABLE" in err_str or "404" in err_str or "NOT_FOUND" in err_str:
+            try:
+                response = client.models.generate_content(
+                    model="gemini-1.5-flash",
+                    contents=summary_prompt,
+                    config=types.GenerateContentConfig(temperature=0.2)
+                )
+                return {"summary": response.text}
+            except Exception as fallback_e:
+                raise HTTPException(status_code=503, detail=f"All models overloaded. Error: {str(fallback_e)}")
         raise HTTPException(status_code=500, detail=f"Gemini API Error: {str(e)}")
 
 if __name__ == "__main__":
