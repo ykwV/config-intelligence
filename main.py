@@ -20,6 +20,19 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# Load local .env if present (git-ignored)
+if os.path.exists(".env"):
+    try:
+        with open(".env", "r") as f:
+            for line in f:
+                line_clean = line.strip()
+                if line_clean.startswith("OPENROUTER_API_KEY="):
+                    val = line_clean.split("=", 1)[1].strip().strip('"').strip("'")
+                    if val:
+                        os.environ.setdefault("OPENROUTER_API_KEY", val)
+    except Exception:
+        pass
+
 # Initialize OpenRouter Client
 openrouter_api_key = os.environ.get("OPENROUTER_API_KEY")
 or_client = OpenAI(
@@ -178,19 +191,15 @@ def _complete_with_openrouter(client, messages, temperature=0.2):
 @app.post("/api/copilot/chat")
 async def copilot_chat(payload: CopilotChatRequest):
     # Use the injected environment variable, or the UI input box if provided
+    key_to_use = payload.gemini_key or os.environ.get("OPENROUTER_API_KEY")
     active_client = or_client
-    if payload.gemini_key:
+    if payload.gemini_key or not active_client:
         active_client = OpenAI(
             base_url="https://openrouter.ai/api/v1",
-            api_key=payload.gemini_key,
-        )
-    elif not active_client and os.environ.get("OPENROUTER_API_KEY"):
-        active_client = OpenAI(
-            base_url="https://openrouter.ai/api/v1",
-            api_key=os.environ.get("OPENROUTER_API_KEY"),
-        )
+            api_key=key_to_use,
+        ) if key_to_use else None
 
-    if not active_client:
+    if not active_client or not key_to_use:
         raise HTTPException(
             status_code=500,
             detail="OpenRouter API Key missing. Please set OPENROUTER_API_KEY in Render."
@@ -218,19 +227,15 @@ async def copilot_chat(payload: CopilotChatRequest):
 
 @app.post("/api/copilot/summary")
 async def copilot_summary(payload: CopilotSummaryRequest):
+    key_to_use = payload.gemini_key or os.environ.get("OPENROUTER_API_KEY")
     active_client = or_client
-    if payload.gemini_key:
+    if payload.gemini_key or not active_client:
         active_client = OpenAI(
             base_url="https://openrouter.ai/api/v1",
-            api_key=payload.gemini_key,
-        )
-    elif not active_client and os.environ.get("OPENROUTER_API_KEY"):
-        active_client = OpenAI(
-            base_url="https://openrouter.ai/api/v1",
-            api_key=os.environ.get("OPENROUTER_API_KEY"),
-        )
+            api_key=key_to_use,
+        ) if key_to_use else None
 
-    if not active_client:
+    if not active_client or not key_to_use:
         raise HTTPException(
             status_code=500,
             detail="OpenRouter API Key missing. Please set OPENROUTER_API_KEY in Render."
