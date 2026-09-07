@@ -399,7 +399,10 @@ class ConfigAnalyticsEngine:
             filtered = filtered[filtered['Status'] == status.upper()]
         if search:
             search_str = str(search).strip()
-            mask = filtered.astype(str).apply(lambda col: col.str.contains(search_str, case=False, na=False)).any(axis=1)
+            search_cols = [c for c in ['Run_ID', 'Config_ID', 'Status', 'Workload_Type', 'Cache_Policy', 'Scheduler', 'Compiler_Opt', 'Memory_Alloc'] if c in filtered.columns]
+            if not search_cols:
+                search_cols = list(filtered.columns)[:10]
+            mask = filtered[search_cols].astype(str).apply(lambda col: col.str.contains(search_str, case=False, na=False)).any(axis=1)
             filtered = filtered[mask]
             
         total = len(filtered)
